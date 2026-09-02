@@ -126,9 +126,19 @@ prompt hint. Files are named `crisp-claude-<i>-of-<n>-<timestamp>.json`.
 
 ## Long exports
 
-Exports of thousands of conversations take a while — the extension deliberately
-paces itself to stay inside Crisp's rate limits (350 ms between conversations,
-200 ms between message pages, exponential backoff on HTTP 429).
+Conversations are fetched by a pool of four workers, each pausing 250 ms
+between its own conversations, with 200 ms between message pages and
+exponential backoff on HTTP 429. Output keeps the inbox's order regardless of
+which worker finishes first.
+
+Both knobs sit together at the top of `main-world.js`:
+
+```js
+const CONCURRENCY = 4;      // conversations fetched at once
+const CONV_PACE_MS = 250;   // each worker's pause between conversations
+```
+
+If Crisp starts rate limiting, lower `CONCURRENCY` before raising the pace.
 
 It is built so a long run survives real life:
 
@@ -182,20 +192,24 @@ Full internals — the command protocol, storage strategy, state flags — are i
 | `background.js` | worker | Mirrors export stats into `chrome.storage` |
 | `popup.html/.css/.js` | — | Extension UI |
 | `analyzer.html/.js` | — | Local analysis dashboard |
-| `test-inbox-filter.js` | — | Node check for filter capture and replay |
+| `test-export.js` | — | Node checks for filter capture, replay and the worker pool |
 
 ---
 
 ## Development
 
 ```bash
-node test-inbox-filter.js    # filter capture + replay check, no dependencies
+node test-export.js    # no dependencies, runs in a few seconds
 ```
 
 It loads `main-world.js` against a stub DOM and drives it the way the page
-does, asserting that a filtered inbox request is captured, that the export
-replays that exact URL on every page, that paging-only params are not mistaken
-for a filter, and that the opt-out really does export everything.
+does, running a full twelve-conversation export against a fake Crisp. It
+asserts that a filtered inbox request is captured and replayed on every list
+page, that paging-only params are not mistaken for a filter, that the opt-out
+exports everything, that message and note totals match a hand count, that the
+worker pool overlaps without exceeding its ceiling, that output order and
+progress counting survive the pool, that a conversation whose messages fail is
+still kept in place, and that cancelling stops the pool.
 
 No build step, no dependencies, no bundler. Edit the files, refresh the
 extension, refresh the Crisp tab.

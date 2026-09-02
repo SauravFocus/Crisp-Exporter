@@ -137,6 +137,15 @@
 
   function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+  // Conversations are fetched by this many workers, each pausing CONV_PACE_MS
+  // between its own conversations. Effective request rate is roughly the two
+  // multiplied together; apiFetch already backs off exponentially on HTTP 429.
+  // ponytail: fixed pool with no shared 429 governor — if Crisp starts rate
+  // limiting, drop CONCURRENCY before raising the pace, or add a global pause
+  // that every worker waits on when any one of them sees a 429.
+  const CONCURRENCY = 4;
+  const CONV_PACE_MS = 250;
+
   // ── IndexedDB persistence (survives page refresh / tab close) ──
   const IDB_NAME = 'crispExporterCache';
   const IDB_STORE = 'exports';
@@ -349,26 +358,40 @@
       const total = filtered.length;
       results.stats.totalConversations = total;
 
-      for (let i = 0; i < filtered.length; i++) {
-        if (CE.cancelled) break;
-        const meta = extractMeta(filtered[i]);
-        postUpdate({ phase:'fetching', total, done:i, current:meta.visitorName });
-        try {
-          const messages = await fetchMessages(websiteId, meta.sessionId);
-          const norm = messages.map(normalizeMsg);
-          const nc = norm.filter(m=>m.isNote).length;
-          results.stats.totalMessages += norm.length;
-          results.stats.totalNotes += nc;
-          results.conversations.push({ ...meta, messages:norm, messageCount:norm.length, noteCount:nc });
-        } catch(e) {
-          results.errors.push({ sessionId:meta.sessionId, visitor:meta.visitorName, error:e.message });
-          results.conversations.push({ ...meta, messages:[], messageCount:0, noteCount:0, fetchError:e.message });
+      // Conversations are fetched by a small pool of workers pulling from a shared
+      // cursor. Slots are written by index so the output keeps the inbox's order
+      // regardless of which worker finishes first.
+      const slots = new Array(total);
+      let cursor = 0, done = 0;
+
+      async function worker() {
+        while (cursor < total && !CE.cancelled) {
+          const i = cursor++;
+          const meta = extractMeta(filtered[i]);
+          try {
+            const messages = await fetchMessages(websiteId, meta.sessionId);
+            const norm = messages.map(normalizeMsg);
+            const nc = norm.filter(m=>m.isNote).length;
+            results.stats.totalMessages += norm.length;
+            results.stats.totalNotes += nc;
+            slots[i] = { ...meta, messages:norm, messageCount:norm.length, noteCount:nc };
+          } catch(e) {
+            results.errors.push({ sessionId:meta.sessionId, visitor:meta.visitorName, error:e.message });
+            slots[i] = { ...meta, messages:[], messageCount:0, noteCount:0, fetchError:e.message };
+          }
+          done++;
+          postUpdate({ phase:'fetching', total, done, current:meta.visitorName });
+          // Checkpoint so a crash/navigation doesn't lose everything
+          if (done % 50 === 0) {
+            results.conversations = slots.filter(Boolean);
+            saveToCache(results).catch(() => {});
+          }
+          if (cursor < total) await delay(CONV_PACE_MS);
         }
-        postUpdate({ phase:'fetching', total, done:i+1, current:meta.visitorName });
-        // Checkpoint every 50 conversations so a crash/navigation doesn't lose everything
-        if ((i + 1) % 50 === 0) saveToCache(results).catch(() => {});
-        if (i < filtered.length-1) await delay(350);
       }
+
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
+      results.conversations = slots.filter(Boolean);
 
       if (CE.cancelled) { CE.exporting=false; postUpdate({phase:'cancelled'}); return; }
 
