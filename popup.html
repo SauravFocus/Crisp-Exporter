@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400">
+  <title>Crisp Chat Exporter</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <div>
+          <h1>Crisp Exporter</h1>
+          <span class="header-version">v1.2</span>
+        </div>
+      </div>
+      <div id="connectionStatus" class="status-badge status-checking">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking…</span>
+      </div>
+    </header>
+
+    <!-- Not on Crisp warning -->
+    <div id="notCrispWarning" class="card card-warning" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <div>
+        <strong>Not on Crisp</strong>
+        <p>Navigate to <code>app.crisp.chat</code> and open your inbox first.</p>
+      </div>
+    </div>
+
+    <!-- Website ID Display -->
+    <div id="websiteInfo" class="card card-info" style="display:none;">
+      <div class="info-row">
+        <span class="info-label">Website ID</span>
+        <code id="websiteIdDisplay" class="info-value"></code>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Visible in inbox</span>
+        <span id="visibleCount" class="info-value">—</span>
+      </div>
+    </div>
+
+    <!-- Active inbox filter -->
+    <div id="inboxFilterCard" class="card card-info" style="display:none;">
+      <label class="inbox-filter">
+        <input type="checkbox" id="useInboxFilter" checked>
+        <span>Export only the inbox's current filter<code id="inboxFilterLabel"></code></span>
+      </label>
+    </div>
+
+    <!-- Filters -->
+    <div id="filtersSection" class="section" style="display:none;">
+      <button class="filters-toggle" id="filtersToggle" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+        </svg>
+        Filters
+        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      <div id="filtersPanel" class="filters-panel" style="display:none;">
+        <div class="filter-group">
+          <label>Status</label>
+          <select id="filterStatus">
+            <option value="all">All conversations</option>
+            <option value="resolved">Resolved only</option>
+            <option value="unresolved">Unresolved only</option>
+            <option value="pending">Pending only</option>
+          </select>
+        </div>
+        <div class="filter-row">
+          <div class="filter-group">
+            <label>From</label>
+            <input type="date" id="filterDateFrom">
+          </div>
+          <div class="filter-group">
+            <label>To</label>
+            <input type="date" id="filterDateTo">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Format -->
+    <div id="formatSection" class="section" style="display:none;">
+      <div class="format-options">
+        <label class="format-option">
+          <input type="radio" name="format" value="csv" checked>
+          <div class="format-card">
+            <span class="format-name">CSV</span>
+            <span class="format-desc">Opens in Excel / Sheets</span>
+          </div>
+        </label>
+        <label class="format-option">
+          <input type="radio" name="format" value="json">
+          <div class="format-card">
+            <span class="format-name">JSON</span>
+            <span class="format-desc">For developers / scripts</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Export Button -->
+    <div id="exportSection" class="section" style="display:none;">
+      <button id="exportBtn" class="btn-export" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Start Export
+      </button>
+    </div>
+
+    <!-- Progress -->
+    <div id="progressSection" class="section" style="display:none;">
+      <div class="progress-header">
+        <span id="progressLabel">Preparing…</span>
+        <span id="progressPercent"></span>
+      </div>
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+      <div id="progressDetail" class="progress-detail"></div>
+      <button id="cancelBtn" class="btn-cancel" type="button">Cancel</button>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsSection" class="section" style="display:none;">
+      <div class="results-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22" class="results-icon">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+          <polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        <span>Export Complete</span>
+      </div>
+
+      <div class="results-stats">
+        <div class="stat">
+          <span class="stat-value" id="statConversations">0</span>
+          <span class="stat-label">Conversations</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="statMessages">0</span>
+          <span class="stat-label">Messages</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="statNotes">0</span>
+          <span class="stat-label">Notes</span>
+        </div>
+      </div>
+
+      <div id="errorSummary" class="error-summary" style="display:none;">
+        <span id="errorCount"></span> conversations had errors and were skipped.
+        <button id="showErrorsBtn" class="btn-link" type="button">View details</button>
+      </div>
+      <div id="errorDetails" class="error-details" style="display:none;"></div>
+
+      <button id="downloadBtn" class="btn-export" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download File
+      </button>
+
+      <button id="analyzeBtn" class="btn-secondary" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+          <line x1="18" y1="20" x2="18" y2="10"/>
+          <line x1="12" y1="20" x2="12" y2="4"/>
+          <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        Analyze Data
+      </button>
+
+      <!-- Split for Claude AI -->
+      <div class="claude-section">
+        <div class="claude-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+            <polyline points="13 2 13 9 20 9"/>
+          </svg>
+          Split for Claude AI
+        </div>
+        <div class="claude-input-row">
+          <span class="claude-input-label">Conversations per chunk</span>
+          <input type="number" id="chunkSize" class="chunk-input" value="100" min="10" max="500">
+        </div>
+        <button id="splitBtn" class="btn-secondary" type="button">Download Chunks</button>
+        <div id="splitStatus" class="split-status" style="display:none;"></div>
+      </div>
+
+      <button id="newExportBtn" class="btn-secondary" type="button">New Export</button>
+    </div>
+
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
